@@ -1,0 +1,247 @@
+# Databricks notebook source
+pip install nltk
+
+
+
+pip install gensim
+
+
+pip install rouge
+
+
+import pandas as pd
+import nltk
+nltk.download('all')
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+ 
+from math import * 
+from numpy import zeros, sum, einsum, diag, dot, arccos
+from numpy.linalg import norm
+from operator import itemgetter
+from scipy.linalg import svd
+import numpy
+import re
+from gensim.models import Word2Vec
+from sklearn.cluster import KMeans
+from scipy.spatial import distance
+nltk.download('punkt')  
+nltk.download('stopwords') 
+from nltk.corpus import stopwords
+from rouge import Rouge 
+from nltk.tokenize import sent_tokenize
+
+
+
+#aws s3 bucket paths for storing the input and output
+aws_buckets=["s3://cs6350utd/cnn/","s3://utdallas-cs6350/air_output.csv"]
+
+
+
+#for storing the reference summary and text of the articles
+articles=[]
+ref_sum=[]
+text=[]
+
+
+for i in range(4,5):
+    file_name=aws_buckets[0]+'1 ('+str(i)+').story'
+    story=spark.sparkContext.textFile(file_name)
+    s=story.collect()
+    s.remove('')
+    sum_ref=s[0]+' '+s[1]+' '+s[3]
+    sum_ref=sum_ref.replace('\n ','')
+    sum_ref=sum_ref.replace('(CNN)','')
+    sum_ref=sum_ref.replace('--','')
+    sum_ref=sum_ref.strip()
+    
+    ref_sum.append(r)
+    
+    text1=''
+
+    for i in range(4,len(s)):
+        text1=text1+' '+s[i]
+    #text.replace('@highlight','')
+    text.append(text1)
+text[0]=text[0].replace('@highlight','')
+
+
+
+sentence = sent_tokenize(text[0])
+
+def t_words(text_collection):
+    l=[]
+    for i in text_collection:
+        l.append(i.split())
+    return l
+
+
+text_collection = []
+for i in range(len(sentence)):
+    sentence_word = re.sub('[^a-zA-Z]', " ", sentence[i])  
+    sentence_word = sentence_word.lower()                            
+    sentence_word=sentence_word.split()                         
+    sentence_word = ' '.join([i for i in sentence_word if i not in stopwords.words('english')])   
+    text_collection.append(sentence_word)
+    
+print(text_collection)
+
+
+n=300
+total_words = t_words(text_collection)
+model = Word2Vec(total_words, min_count=1,vector_size= n)
+
+
+
+
+sentence__vector=[]
+for sentences in text_collection:
+    sum=0
+    for words in sentences.split():
+        sum+=model.wv[words]
+    sum = sum/len(sentences) 
+    sentence__vector.append(sum)
+    
+
+
+n_clusters = 3
+kmeans = KMeans(n_clusters, init = 'k-means++', random_state = 42)
+
+cluster_number = kmeans.fit_predict(sentence__vector)
+
+temp_list=[]
+for i in range(n_clusters):
+    temp_dict={}
+    
+    for j in range(len(cluster_number)):
+        
+        if cluster_number[j]==i:
+            temp_dict[j] =  distance.euclidean(kmeans.cluster_centers_[i],sentence__vector[j])
+    min_distance = min(temp_dict.values())
+    temp_list.append(min(temp_dict, key=temp_dict.get))
+
+                            
+#print(temp_list)
+#print(cluster_number)
+
+for i in sorted(temp_list):
+    print(sentence[i])
+
+
+
+
+
+temp_list
+t=sorted(temp_list)
+sum1=''
+sum1=sum1.join(sentence[t[0]])
+sum1=sum1+''+sentence[t[1]]
+sum1=sum1+''+sentence[t[2]]
+sum1
+
+
+
+r = Rouge()
+rouge = r.get_scores(sum1, ref_sum[0])
+
+
+
+rouge
+
+
+
+weirdChar = ''',:'!'''
+
+
+class LSA(object):
+
+    def __init__(self, weirdChar):
+        self.weirdChar = weirdChar
+        self.wd_mpng = {}
+        self.counter = 0        
+        
+    def action(self, story):
+        storyWords = story.split();
+        
+        for word in storyWords:
+     
+            word = word.translate(str.maketrans('','', self.weirdChar))
+            if word in self.wd_mpng:
+                self.wd_mpng[word].append(self.counter)
+            else:
+                self.wd_mpng[word] = [self.counter]
+        self.counter += 1  
+    
+    def createMat(self):
+
+        self.recurrWords = []
+        for r in self.wd_mpng.keys():
+            if len(self.wd_mpng[r]) > 1:
+                self.recurrWords.append(r)
+        self.recurrWords.sort()
+       
+        self.countMat = zeros([len(self.recurrWords), self.counter])
+        for i, r in enumerate(self.recurrWords):
+            for w in self.wd_mpng[r]:
+                self.countMat[i,w] += 1
+        
+    
+    def estimateSVD(self):
+        self.matU, self.matS, self.vT = svd(self.countMat)
+    
+    def matU(self):
+  
+        return -1 * self.matU
+    
+    def matS(self):
+    
+        return self.matS
+    
+    def vT(self):
+      
+        return -1 * self.vT
+
+
+def implementSVD(countMat):
+    temp1, matU = numpy.linalg.eig(countMat @ countMat.T) 
+    temp2, vT = numpy.linalg.eig(countMat.T @ countMat)
+    idx = temp1.argsort()[::-1]
+    temp1 = temp1[idx]
+    matU = matU[:, idx]
+    idx = temp2.argsort()[::-1]
+    vT = vT[:, idx]
+    
+  
+    Sigma = einsum('ij,ik,jk->j', matU, countMat, vT)
+    return matU, Sigma, vT.T
+
+
+def shortening(story = None, k = 3):
+    lsa_object = LSA(weirdChar)
+    lines = story.split('.')
+    
+    for each in lines:
+        lsa_object.action(each)
+    lsa_object.createMat()
+    lsa_object.estimateSVD()
+    
+    # Extracting summary based on importance
+    summary =[(lines[i], norm(dot(diag(lsa_object.matS), lsa_object.vT[:,j]),2)) for i in range(len(lines)) for j in range(len(lsa_object.vT))]
+    return '.'.join([i for i, j in sorted(summary, key=itemgetter(1))][len(summary)-(k):])
+
+
+
+sum_3=shortening(text[0], k=3)
+
+
+
+sum_3
+
+
+
+r = Rouge()
+rouge3 = r.get_scores(sum_3, ref_sum[0])
+
+
+
+rouge3
